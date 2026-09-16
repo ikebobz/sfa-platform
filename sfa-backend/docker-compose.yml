@@ -1,0 +1,43 @@
+version: "3.9"
+
+services:
+  mariadb:
+    image: mariadb:11
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: root_change_me
+      MYSQL_DATABASE: sfa_platform
+      MYSQL_USER: sfa_user
+      MYSQL_PASSWORD: change_me
+    ports:
+      - "3306:3306"
+    volumes:
+      - mariadb_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      mariadb:
+        condition: service_healthy
+    environment:
+      NODE_ENV: development
+      PORT: 4000
+      DB_HOST: mariadb
+      DB_PORT: 3306
+      DB_USER: sfa_user
+      DB_PASSWORD: change_me
+      DB_NAME: sfa_platform
+      JWT_ACCESS_SECRET: dev_only_change_me
+      JWT_REFRESH_SECRET: dev_only_change_me_too
+      CORS_ORIGIN: http://localhost:5173
+    ports:
+      - "4000:4000"
+
+volumes:
+  mariadb_data:
