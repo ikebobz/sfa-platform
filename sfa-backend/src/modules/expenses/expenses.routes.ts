@@ -6,6 +6,7 @@ import { ApiError } from "../../common/api-error";
 import { getPagination, paginate } from "../../common/pagination";
 import { requireAuth, requireRole } from "../../middleware/auth.middleware";
 import { writeAuditLog } from "../../common/audit";
+import { visibleTerritoryIds } from "../../common/scope";
 
 export const expensesRouter = Router();
 
@@ -28,14 +29,23 @@ expensesRouter.get(
   "/",
   asyncHandler(async (req, res) => {
     const { page, pageSize } = getPagination(req);
-    const repId = req.user!.role === "rep" ? req.user!.id : Number(req.query.repId) || undefined;
+    const user = req.user!;
     const status = req.query.status as string | undefined;
 
-    let base = db("expenses");
-    if (repId) base = base.where({ rep_id: repId });
-    if (status) base = base.andWhere({ approval_status: status });
+    let base = db("expenses as e").join("users as u", "u.id", "e.rep_id").select("e.*", "u.name as rep_name");
 
-    const result = await paginate(base.clone().orderBy("expense_date", "desc"), base.clone(), {
+    if (user.role === "rep") {
+      base = base.where("e.rep_id", user.id);
+    } else {
+      const territoryIds = await visibleTerritoryIds(user);
+      if (territoryIds !== null) {
+        base = territoryIds.length ? base.whereIn("u.territory_id", territoryIds) : base.whereRaw("1 = 0");
+      }
+      if (req.query.repId) base = base.andWhere("e.rep_id", Number(req.query.repId));
+    }
+    if (status) base = base.andWhere("e.approval_status", status);
+
+    const result = await paginate(base.clone().orderBy("e.expense_date", "desc"), base.clone(), {
       page,
       pageSize,
     });

@@ -4,6 +4,9 @@ const statusClasses: Record<string, string> = {
   planned: "bg-[#E7ECF3] text-ink",
   completed: "bg-good-bg text-good",
   missed: "bg-poor-bg text-poor",
+  pending: "bg-watch-bg text-watch",
+  approved: "bg-good-bg text-good",
+  rejected: "bg-poor-bg text-poor",
 };
 
 export function StatusTag({ status }: { status: string }) {

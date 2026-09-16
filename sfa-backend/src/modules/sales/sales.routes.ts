@@ -6,6 +6,7 @@ import { asyncHandler } from "../../common/http";
 import { ApiError } from "../../common/api-error";
 import { getPagination, paginate } from "../../common/pagination";
 import { requireAuth } from "../../middleware/auth.middleware";
+import { visibleTerritoryIds } from "../../common/scope";
 
 export const salesRouter = Router();
 
@@ -109,15 +110,29 @@ salesRouter.get(
   "/",
   asyncHandler(async (req, res) => {
     const { page, pageSize } = getPagination(req);
-    const repId = req.user!.role === "rep" ? req.user!.id : Number(req.query.repId) || undefined;
+    const user = req.user!;
+    const productId = Number(req.query.productId) || undefined;
     const customerId = Number(req.query.customerId) || undefined;
 
     let base = db("sales as s")
       .join("customers as c", "c.id", "s.customer_id")
       .join("products as p", "p.id", "s.product_id")
-      .select("s.*", "c.business_name", "p.name as product_name");
-    if (repId) base = base.where("s.rep_id", repId);
+      .join("users as u", "u.id", "s.rep_id")
+      .select("s.*", "c.business_name", "p.name as product_name", "u.name as rep_name");
+
+    if (user.role === "rep") {
+      base = base.where("s.rep_id", user.id);
+    } else {
+      const territoryIds = await visibleTerritoryIds(user);
+      if (territoryIds !== null) {
+        base = territoryIds.length ? base.whereIn("c.territory_id", territoryIds) : base.whereRaw("1 = 0");
+      }
+      if (req.query.repId) base = base.andWhere("s.rep_id", Number(req.query.repId));
+    }
     if (customerId) base = base.andWhere("s.customer_id", customerId);
+    if (productId) base = base.andWhere("s.product_id", productId);
+    if (req.query.from) base = base.andWhere("s.sale_date", ">=", req.query.from as string);
+    if (req.query.to) base = base.andWhere("s.sale_date", "<=", req.query.to as string);
 
     const result = await paginate(base.clone().orderBy("s.sale_date", "desc"), base.clone(), { page, pageSize });
     res.json(result);
@@ -133,6 +148,15 @@ salesRouter.post(
 
     const product = await db("products").where({ id: data.productId }).whereNull("deleted_at").first();
     if (!product) throw ApiError.notFound("Product not found");
+
+    const customer = await db("customers").where({ id: data.customerId }).whereNull("deleted_at").first();
+    if (!customer) throw ApiError.notFound("Customer not found");
+
+    // A rep may only record sales against customers in their own territory — mirrors the
+    // same rule already enforced on customer creation in customers.routes.ts.
+    if (req.user!.role === "rep" && customer.territory_id !== req.user!.territoryId) {
+      throw ApiError.forbidden("You can only record sales for customers in your own territory");
+    }
 
     const unitPrice = data.unitPrice ?? Number(product.unit_price);
     const revenue = unitPrice * data.quantity;
