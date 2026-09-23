@@ -4,6 +4,7 @@ import { db } from "../../config/db";
 import { asyncHandler } from "../../common/http";
 import { ApiError } from "../../common/api-error";
 import { requireAuth, requireRole } from "../../middleware/auth.middleware";
+import { visibleTerritoryIds } from "../../common/scope";
 
 export const incentivesRouter = Router();
 
@@ -20,10 +21,25 @@ incentivesRouter.use(requireAuth);
 incentivesRouter.get(
   "/",
   asyncHandler(async (req, res) => {
-    const repId = req.user!.role === "rep" ? req.user!.id : Number(req.query.repId) || undefined;
-    let query = db("incentives").orderBy("period", "desc");
-    if (repId) query = query.where({ rep_id: repId });
-    if (req.query.period) query = query.andWhere({ period: req.query.period as string });
+    const user = req.user!;
+
+    let query = db("incentives as i")
+      .join("users as u", "u.id", "i.rep_id")
+      .leftJoin("products as p", "p.id", "i.product_id")
+      .select("i.*", "u.name as rep_name", "p.name as product_name")
+      .orderBy("i.period", "desc");
+
+    if (user.role === "rep") {
+      query = query.where("i.rep_id", user.id);
+    } else {
+      const territoryIds = await visibleTerritoryIds(user);
+      if (territoryIds !== null) {
+        query = territoryIds.length ? query.whereIn("u.territory_id", territoryIds) : query.whereRaw("1 = 0");
+      }
+      if (req.query.repId) query = query.andWhere("i.rep_id", Number(req.query.repId));
+    }
+    if (req.query.period) query = query.andWhere("i.period", req.query.period as string);
+
     res.json(await query);
   })
 );
@@ -43,11 +59,11 @@ incentivesRouter.post(
     const period = parsed.data.period;
     const periodPrefix = period.slice(0, 7); // YYYY-MM
 
-    const revenueByRep = await db("sales")
+    const revenueByRep = (await db("sales")
       .select("rep_id")
       .sum({ revenue: "revenue" })
       .whereRaw("DATE_FORMAT(sale_date, '%Y-%m') = ?", [periodPrefix])
-      .groupBy("rep_id");
+      .groupBy("rep_id")) as Array<{ rep_id: number; revenue: number | string }>;
 
     const results = await db.transaction(async (trx) => {
       const rows = [];

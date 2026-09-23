@@ -1,7 +1,10 @@
 import { Request, Router } from "express";
+import { Knex } from "knex";
 import { db } from "../../config/db";
 import { asyncHandler } from "../../common/http";
+import { ApiError } from "../../common/api-error";
 import { requireAuth } from "../../middleware/auth.middleware";
+import { visibleTerritoryIds } from "../../common/scope";
 
 export const dashboardRouter = Router();
 
@@ -24,16 +27,35 @@ function readFilters(req: Request): Filters {
 /**
  * Single aggregate endpoint replicating the original Excel Dashboard tab:
  * database size, visit coverage, revenue, top products/customers, expense status.
- * Reps are implicitly scoped to their own territory; RSM/NSM/Admin may pass ?territoryId=.
+ * Reps are implicitly scoped to their own territory; RSM/NSM/Admin may narrow with
+ * ?territoryId=, but never outside what visibleTerritoryIds() allows them to see —
+ * and critically, the *default* "all territories" view for an RSM is their own
+ * region, not the whole company (this endpoint previously ignored territory
+ * scoping entirely for expenses/debt, and for every metric once no explicit
+ * ?territoryId= was passed).
  */
 dashboardRouter.get(
   "/overview",
   asyncHandler(async (req, res) => {
     const filters = readFilters(req);
-    const territoryId = req.user!.role === "rep" ? req.user!.territoryId ?? undefined : filters.territoryId;
+    const user = req.user!;
+    const allowed = await visibleTerritoryIds(user);
 
-    const customerQuery = db("customers").whereNull("deleted_at");
-    if (territoryId) customerQuery.andWhere({ territory_id: territoryId });
+    if (filters.territoryId && allowed !== null && !allowed.includes(filters.territoryId)) {
+      throw ApiError.forbidden("Territory is outside your visible scope");
+    }
+    // null = unrestricted (admin/nsm with no explicit filter); otherwise a concrete list to scope every query by.
+    const territoryFilter: number[] | null = filters.territoryId
+      ? [filters.territoryId]
+      : allowed;
+
+    function scopeByTerritory(query: Knex.QueryBuilder, column: string): Knex.QueryBuilder {
+      if (territoryFilter === null) return query;
+      return territoryFilter.length ? query.whereIn(column, territoryFilter) : query.whereRaw("1 = 0");
+    }
+
+    let customerQuery = db("customers").whereNull("deleted_at");
+    customerQuery = scopeByTerritory(customerQuery, "territory_id");
 
     const [{ total: totalCustomers }] = (await customerQuery
       .clone()
@@ -43,8 +65,7 @@ dashboardRouter.get(
       .andWhere({ status: "active" })
       .count({ total: "*" })) as unknown as [{ total: number }];
 
-    let salesQuery = db("sales as s").join("customers as c", "c.id", "s.customer_id");
-    if (territoryId) salesQuery = salesQuery.andWhere("c.territory_id", territoryId);
+    let salesQuery = scopeByTerritory(db("sales as s").join("customers as c", "c.id", "s.customer_id"), "c.territory_id");
     if (filters.from) salesQuery = salesQuery.andWhere("s.sale_date", ">=", filters.from);
     if (filters.to) salesQuery = salesQuery.andWhere("s.sale_date", "<=", filters.to);
 
@@ -77,28 +98,39 @@ dashboardRouter.get(
       .orderBy("revenue", "asc")
       .limit(30);
 
-    let visitQuery = db("visit_logs as vl").join("customers as c", "c.id", "vl.customer_id");
-    if (territoryId) visitQuery = visitQuery.andWhere("c.territory_id", territoryId);
+    let visitQuery = scopeByTerritory(
+      db("visit_logs as vl").join("customers as c", "c.id", "vl.customer_id"),
+      "c.territory_id"
+    );
     if (filters.from) visitQuery = visitQuery.andWhere("vl.visit_date", ">=", filters.from);
     if (filters.to) visitQuery = visitQuery.andWhere("vl.visit_date", "<=", filters.to);
     const [{ totalVisits }] = (await visitQuery
       .clone()
       .count({ totalVisits: "*" })) as unknown as [{ totalVisits: number }];
 
-    let expenseQuery = db("expenses");
-    if (filters.from) expenseQuery = expenseQuery.andWhere("expense_date", ">=", filters.from);
-    if (filters.to) expenseQuery = expenseQuery.andWhere("expense_date", "<=", filters.to);
+    // Expenses are attributed to a rep, not a customer, so scope via the rep's territory.
+    let expenseQuery = scopeByTerritory(
+      db("expenses as e").join("users as u", "u.id", "e.rep_id"),
+      "u.territory_id"
+    );
+    if (filters.from) expenseQuery = expenseQuery.andWhere("e.expense_date", ">=", filters.from);
+    if (filters.to) expenseQuery = expenseQuery.andWhere("e.expense_date", "<=", filters.to);
     const [{ totalExpenses }] = (await expenseQuery
       .clone()
-      .sum({ totalExpenses: "total_cost" })) as unknown as [{ totalExpenses: number | null }];
+      .sum({ totalExpenses: "e.total_cost" })) as unknown as [{ totalExpenses: number | null }];
 
-    const [{ totalDebt }] = (await db("ledger_entries")
-      .sum({ totalDebt: "closing_balance" })) as unknown as [{ totalDebt: number | null }];
+    let debtQuery = scopeByTerritory(
+      db("ledger_entries as le").join("customers as c", "c.id", "le.customer_id"),
+      "c.territory_id"
+    );
+    const [{ totalDebt }] = (await debtQuery
+      .clone()
+      .sum({ totalDebt: "le.closing_balance" })) as unknown as [{ totalDebt: number | null }];
 
     const activeRatio = totalCustomers ? Number(activeCustomers) / Number(totalCustomers) : 0;
 
     res.json({
-      filters: { territoryId, from: filters.from, to: filters.to },
+      filters: { territoryId: filters.territoryId, from: filters.from, to: filters.to },
       database: {
         totalCustomers: Number(totalCustomers),
         activeCustomers: Number(activeCustomers),

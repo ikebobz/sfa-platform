@@ -9,7 +9,9 @@ import { Planning } from "./pages/Planning";
 import { Customers } from "./pages/Customers";
 import { SalesRedistribution } from "./pages/Sales";
 import { Expenses } from "./pages/Expenses";
-import { ComingSoon } from "./pages/ComingSoon";
+import { Incentives } from "./pages/Incentives";
+import { Reports } from "./pages/Reports";
+import { UsersTerritories } from "./pages/UsersTerritories";
 
 export function App() {
   return (
@@ -31,9 +33,9 @@ export function App() {
             <Route path="/customers" element={<Customers />} />
             <Route path="/sales" element={<SalesRedistribution />} />
             <Route path="/expenses" element={<Expenses />} />
-            <Route path="/incentives" element={<ComingSoon title="Incentives" />} />
-            <Route path="/reports" element={<ComingSoon title="Reports" />} />
-            <Route path="/admin/users" element={<ComingSoon title="Users & Territories" />} />
+            <Route path="/incentives" element={<Incentives />} />
+            <Route path="/reports" element={<Reports />} />
+            <Route path="/admin/users" element={<UsersTerritories />} />
           </Route>
         </Routes>
       </AuthProvider>

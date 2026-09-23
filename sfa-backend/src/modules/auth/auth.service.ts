@@ -18,10 +18,10 @@ interface UserRow {
 function signTokens(user: UserRow) {
   const payload = { id: user.id, role: user.role, territoryId: user.territory_id };
   const accessToken = jwt.sign(payload, env.jwt.accessSecret, {
-    expiresIn: env.jwt.accessExpiresIn,
+    expiresIn: env.jwt.accessExpiresIn as jwt.SignOptions["expiresIn"],
   });
   const refreshToken = jwt.sign(payload, env.jwt.refreshSecret, {
-    expiresIn: env.jwt.refreshExpiresIn,
+    expiresIn: env.jwt.refreshExpiresIn as jwt.SignOptions["expiresIn"],
   });
   return { accessToken, refreshToken };
 }

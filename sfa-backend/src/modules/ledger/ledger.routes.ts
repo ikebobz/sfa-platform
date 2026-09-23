@@ -3,18 +3,19 @@ import { db } from "../../config/db";
 import { asyncHandler } from "../../common/http";
 import { ApiError } from "../../common/api-error";
 import { requireAuth } from "../../middleware/auth.middleware";
+import { visibleTerritoryIds } from "../../common/scope";
 
 export const ledgerRouter = Router();
 
 ledgerRouter.use(requireAuth);
 
 // Configurable thresholds — move to a settings table if these need to be tunable per organisation.
-const CREDIT_RISK_THRESHOLDS = {
+export const CREDIT_RISK_THRESHOLDS = {
   goodMax: 200_000, // closing balance below this => "good"
   watchMax: 750_000, // below this => "watch", otherwise "poor"
 };
 
-function creditRisk(closingBalance: number): "good" | "watch" | "poor" {
+export function creditRisk(closingBalance: number): "good" | "watch" | "poor" {
   if (closingBalance <= CREDIT_RISK_THRESHOLDS.goodMax) return "good";
   if (closingBalance <= CREDIT_RISK_THRESHOLDS.watchMax) return "watch";
   return "poor";
@@ -25,6 +26,13 @@ ledgerRouter.get(
   asyncHandler(async (req, res) => {
     const customer = await db("customers").where({ id: req.params.customerId }).first();
     if (!customer) throw ApiError.notFound("Customer not found");
+
+    // A rep may only view ledgers for customers in their own territory; RSM likewise
+    // restricted to their region. Mirrors the same rule used for sales/visit writes.
+    const territoryIds = await visibleTerritoryIds(req.user!);
+    if (territoryIds !== null && !territoryIds.includes(customer.territory_id)) {
+      throw ApiError.forbidden("This customer is outside your visible territory scope");
+    }
 
     const entries = await db("ledger_entries")
       .where({ customer_id: req.params.customerId })
@@ -45,7 +53,13 @@ ledgerRouter.get(
 ledgerRouter.get(
   "/debt-analysis",
   asyncHandler(async (req, res) => {
-    const territoryId = req.query.territoryId ? Number(req.query.territoryId) : undefined;
+    const requestedTerritoryId = req.query.territoryId ? Number(req.query.territoryId) : undefined;
+    const territoryIds = await visibleTerritoryIds(req.user!);
+
+    if (requestedTerritoryId && territoryIds !== null && !territoryIds.includes(requestedTerritoryId)) {
+      throw ApiError.forbidden("Territory is outside your visible scope");
+    }
+    const allowed = requestedTerritoryId ? [requestedTerritoryId] : territoryIds;
 
     const latestPeriods = db("ledger_entries as le1")
       .select("le1.customer_id")
@@ -62,7 +76,7 @@ ledgerRouter.get(
       .where("le.closing_balance", ">", 0)
       .orderBy("le.closing_balance", "desc");
 
-    if (territoryId) query = query.andWhere("c.territory_id", territoryId);
+    if (allowed !== null) query = allowed.length ? query.whereIn("c.territory_id", allowed) : query.whereRaw("1 = 0");
 
     const rows = await query;
     res.json(

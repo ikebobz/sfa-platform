@@ -7,6 +7,8 @@ const statusClasses: Record<string, string> = {
   pending: "bg-watch-bg text-watch",
   approved: "bg-good-bg text-good",
   rejected: "bg-poor-bg text-poor",
+  qualified: "bg-good-bg text-good",
+  paid: "bg-[#E7ECF3] text-ink",
 };
 
 export function StatusTag({ status }: { status: string }) {
