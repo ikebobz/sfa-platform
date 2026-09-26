@@ -3,12 +3,14 @@ export interface DashboardOverview {
   database: {
     totalCustomers: number;
     activeCustomers: number;
+    newCustomersInPeriod: number;
     activeRatio: number;
     verdict: string;
   };
   visits: { totalVisits: number };
   revenue: {
     total: number;
+    salesCount: number;
     topProducts: { id: number; name: string; revenue: number }[];
     topCustomers: { id: number; business_name: string; revenue: number }[];
     bottomCustomers: { id: number; business_name: string; revenue: number }[];

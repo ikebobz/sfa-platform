@@ -4,7 +4,7 @@ import { db } from "../../config/db";
 import { asyncHandler } from "../../common/http";
 import { ApiError } from "../../common/api-error";
 import { getPagination, paginate } from "../../common/pagination";
-import { requireAuth } from "../../middleware/auth.middleware";
+import { requireAuth, requireRole } from "../../middleware/auth.middleware";
 import { writeAuditLog } from "../../common/audit";
 
 export const customersRouter = Router();
@@ -30,32 +30,32 @@ customersRouter.use(requireAuth);
  * - admin / nsm: all customers
  * - rsm: all customers whose territory is in the same region as the RSM's home territory
  * - rep: only customers in the rep's own territory
+ *
+ * Returns { query } — a plain object wrapping the builder, not the builder itself.
+ * This matters: a Knex query builder is "thenable" (it implements .then(), which
+ * runs the query), so an `async function` that directly `return`s a builder gets
+ * that builder auto-adopted by the async function's own promise machinery —
+ * the query executes immediately and the caller's `await` resolves to the
+ * *rows*, not the builder, silently breaking every later `.where(...)`/`.clone()`
+ * call. Wrapping it in `{ query }` avoids that entirely, since a plain object
+ * isn't thenable.
  */
-function scopeToRole(query: ReturnType<typeof db>, user: NonNullable<Express.Request["user"]>) {
-  /*if (user.role === "admin" || user.role === "nsm") return query;
+async function scopeToRole(query: ReturnType<typeof db>, user: NonNullable<Express.Request["user"]>) {
+  if (user.role === "admin" || user.role === "nsm") return { query };
 
   if (user.role === "rsm") {
     const home = await db("territories").where({ id: user.territoryId }).first();
-    if (!home) return query.whereRaw("1 = 0");
-    return query.whereIn(
-      "customers.territory_id",
-      db("territories").select("id").where({ region: home.region })
-    );
+    if (!home) return { query: query.whereRaw("1 = 0") };
+    return {
+      query: query.whereIn(
+        "customers.territory_id",
+        db("territories").select("id").where({ region: home.region })
+      ),
+    };
   }
 
   // rep
-  return query.where("customers.territory_id", user.territoryId);*/
-  if (user.role === "admin" || user.role === "nsm") return query;
-  if (user.role === "rsm") {
-    return query.whereIn(
-      "customers.territory_id",
-      db("territories")
-        .select("id")
-        .whereIn("region", db("territories").select("region").where({ id: user.territoryId }))
-    );
-  }
-  // rep
-  return query.where("customers.territory_id", user.territoryId);
+  return { query: query.where("customers.territory_id", user.territoryId) };
 }
 
 customersRouter.get(
@@ -69,7 +69,7 @@ customersRouter.get(
     let base = db("customers").whereNull("deleted_at");
     if (search) base = base.andWhere("business_name", "like", `%${search}%`);
     if (status) base = base.andWhere({ status });
-    base = scopeToRole(base, req.user!);
+    ({ query: base } = await scopeToRole(base, req.user!));
     // Applied after scopeToRole so a manager can narrow further, but never outside their allowed scope.
     if (territoryId) base = base.andWhere("customers.territory_id", territoryId);
 
@@ -82,22 +82,26 @@ customersRouter.get(
   "/:id",
   asyncHandler(async (req, res) => {
     let query = db("customers").where({ id: req.params.id }).whereNull("deleted_at");
-    query = await scopeToRole(query, req.user!);
+    ({ query } = await scopeToRole(query, req.user!));
     const customer = await query.first();
     if (!customer) throw ApiError.notFound("Customer not found");
     res.json(customer);
   })
 );
 
+// Only reps add customers — this is deliberately not open to admin/RSM/NSM.
+// The territory database is meant to be built by the person actually meeting
+// these businesses in the field, not entered secondhand by management.
 customersRouter.post(
   "/",
+  requireRole("rep"),
   asyncHandler(async (req, res) => {
     const parsed = customerSchema.safeParse(req.body);
     if (!parsed.success) throw ApiError.badRequest("Invalid customer payload", parsed.error.flatten());
 
-    // Reps may only add customers into their own territory.
-    if (req.user!.role === "rep" && parsed.data.territoryId !== req.user!.territoryId) {
-      throw ApiError.forbidden("Reps can only add customers within their own territory");
+    // A rep may only add customers into their own territory.
+    if (parsed.data.territoryId !== req.user!.territoryId) {
+      throw ApiError.forbidden("You can only add customers within your own territory");
     }
 
     const [id] = await db("customers").insert({
@@ -126,7 +130,7 @@ customersRouter.patch(
     if (!parsed.success) throw ApiError.badRequest("Invalid customer payload", parsed.error.flatten());
 
     let scoped = db("customers").where({ id: req.params.id }).whereNull("deleted_at");
-    scoped = await scopeToRole(scoped, req.user!);
+    ({ query: scoped } = await scopeToRole(scoped, req.user!));
     const existing = await scoped.first();
     if (!existing) throw ApiError.notFound("Customer not found");
 

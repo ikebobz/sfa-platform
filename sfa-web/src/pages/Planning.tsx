@@ -1,4 +1,5 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { apiRequest } from "../api/client";
 import { useAuth } from "../context/AuthContext";
 import { VisitPlan, Product, RepSummary } from "../types/planning";
@@ -92,7 +93,9 @@ export function Planning() {
     }
   }
 
-  async function updateStatus(planId: number, status: "completed" | "missed") {
+  // "completed" is set automatically when a visit is logged against this plan
+  // (see the Visits screen) — this action only ever marks a plan missed.
+  async function updateStatus(planId: number, status: "missed") {
     try {
       await apiRequest(`/visit-plans/${planId}/status`, { method: "PATCH", body: { status } });
       load();
@@ -233,12 +236,12 @@ export function Planning() {
                     <td className="py-2.5 text-right whitespace-nowrap">
                       {p.status === "planned" && (
                         <>
-                          <button
-                            onClick={() => updateStatus(p.id, "completed")}
+                          <Link
+                            to={`/visits?planId=${p.id}&customerId=${p.customer_id}`}
                             className="text-good hover:underline mr-3"
                           >
-                            Mark done
-                          </button>
+                            Log visit
+                          </Link>
                           <button onClick={() => updateStatus(p.id, "missed")} className="text-poor hover:underline">
                             Mark missed
                           </button>

@@ -10,13 +10,15 @@ interface NavItem {
 const NAV_ITEMS: NavItem[] = [
   { to: "/", label: "Overview" },
   { to: "/planning", label: "Planning" },
+  { to: "/visits", label: "Visits" },
   { to: "/customers", label: "Customers" },
   { to: "/sales", label: "Sales & Redistribution" },
+  { to: "/stock", label: "Stock" },
   { to: "/debt-ledger", label: "Debt & Ledger" },
   { to: "/expenses", label: "Expenses" },
   { to: "/incentives", label: "Incentives" },
   { to: "/reports", label: "Reports", roles: ["admin", "nsm", "rsm"] },
-  { to: "/admin/users", label: "Users & Territories", roles: ["admin"] },
+  { to: "/admin/users", label: "Master Data", roles: ["admin"] },
 ];
 
 export function AppShell() {

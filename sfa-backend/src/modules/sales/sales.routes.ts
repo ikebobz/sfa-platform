@@ -5,8 +5,9 @@ import { db } from "../../config/db";
 import { asyncHandler } from "../../common/http";
 import { ApiError } from "../../common/api-error";
 import { getPagination, paginate } from "../../common/pagination";
-import { requireAuth } from "../../middleware/auth.middleware";
+import { requireAuth, requireRole } from "../../middleware/auth.middleware";
 import { visibleTerritoryIds } from "../../common/scope";
+import { adjustStockBalance } from "../stock/stock.service";
 
 export const salesRouter = Router();
 
@@ -141,6 +142,7 @@ salesRouter.get(
 
 salesRouter.post(
   "/",
+  requireRole("rep"),
   asyncHandler(async (req, res) => {
     const parsed = saleSchema.safeParse(req.body);
     if (!parsed.success) throw ApiError.badRequest("Invalid sale payload", parsed.error.flatten());
@@ -171,8 +173,10 @@ salesRouter.post(
       throw ApiError.badRequest("Part payment must be less than the sale revenue");
     }
 
-    // Sale creation, ledger update, and stock roll-up must succeed or fail together.
-    const saleId = await db.transaction(async (trx) => {
+    // Sale creation, ledger update, stock roll-up, and balance depletion must succeed or fail
+    // together — if there isn't enough stock on hand, adjustStockBalance throws and the whole
+    // sale (including the ledger/stock_daily writes above it) rolls back.
+    const result = await db.transaction(async (trx) => {
       const [id] = await trx("sales").insert({
         visit_id: data.visitId,
         customer_id: data.customerId,
@@ -188,11 +192,12 @@ salesRouter.post(
 
       await applyToLedger(trx, data.customerId, data.saleDate, revenue, amountPaid);
       await applyToStockDaily(trx, req.user!.id, data.saleDate, revenue, data.productId, data.quantity);
+      const remainingStock = await adjustStockBalance(trx, req.user!.id, data.productId, -data.quantity);
       await trx("customers").where({ id: data.customerId }).update({ last_supply_date: data.saleDate });
 
-      return id;
+      return { id, remainingStock };
     });
 
-    res.status(201).json({ id: saleId, revenue, amountPaid });
+    res.status(201).json({ id: result.id, revenue, amountPaid, remainingStock: result.remainingStock });
   })
 );

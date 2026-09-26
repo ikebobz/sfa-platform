@@ -5,6 +5,7 @@ import { asyncHandler } from "../../common/http";
 import { ApiError } from "../../common/api-error";
 import { requireAuth, requireRole } from "../../middleware/auth.middleware";
 import { writeAuditLog } from "../../common/audit";
+import { visibleTerritoryIds } from "../../common/scope";
 
 export const territoriesRouter = Router();
 
@@ -16,11 +17,23 @@ const territorySchema = z.object({
 
 territoriesRouter.use(requireAuth);
 
+// Scoped the same way as every other list endpoint in this app: a rep sees
+// only their own territory, an RSM sees their region's territories, and
+// NSM/admin see everything. This was the one list endpoint in the whole
+// backend that had been missed — every other module (customers, sales,
+// expenses, visit-plans, visit-logs, incentives, stock) already had this
+// applied. Before this fix, any authenticated rep could call GET /territories
+// directly and see every territory in the organisation, even though the
+// customer-creation form's dropdown only ever displayed their own.
 territoriesRouter.get(
   "/",
-  asyncHandler(async (_req, res) => {
-    const rows = await db("territories").whereNull("deleted_at").orderBy("name");
-    res.json(rows);
+  asyncHandler(async (req, res) => {
+    let query = db("territories").whereNull("deleted_at").orderBy("name");
+    const territoryIds = await visibleTerritoryIds(req.user!);
+    if (territoryIds !== null) {
+      query = territoryIds.length ? query.whereIn("id", territoryIds) : query.whereRaw("1 = 0");
+    }
+    res.json(await query);
   })
 );
 

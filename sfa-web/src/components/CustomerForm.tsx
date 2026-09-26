@@ -104,7 +104,11 @@ export function CustomerForm({
 
         <Field label="Territory">
           {lockTerritoryId ? (
-            <Input disabled value={territories.find((t) => t.id === lockTerritoryId)?.name ?? ""} />
+            <Select disabled value={lockTerritoryId}>
+              <option value={lockTerritoryId}>
+                {territories.find((t) => t.id === lockTerritoryId)?.name ?? "Loading…"}
+              </option>
+            </Select>
           ) : (
             <Select
               required

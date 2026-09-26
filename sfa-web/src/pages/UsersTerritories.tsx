@@ -3,6 +3,7 @@ import { apiRequest } from "../api/client";
 import { useAuth } from "../context/AuthContext";
 import { AdminUser, Role, UserFormValues, emptyUserForm } from "../types/users";
 import { Territory } from "../types/dashboard";
+import { Product } from "../types/planning";
 import { Panel } from "../components/ui/Panel";
 import { Pagination } from "../components/ui/Pagination";
 import { StatusTag } from "../components/ui/StatusTag";
@@ -130,11 +131,147 @@ function TerritoriesPanel({ territories, onChanged }: { territories: Territory[]
   );
 }
 
+function ProductsPanel({ products, onChanged }: { products: Product[]; onChanged: () => void }) {
+  const [formOpen, setFormOpen] = useState(false);
+  const [editing, setEditing] = useState<Product | undefined>(undefined);
+  const [name, setName] = useState("");
+  const [category, setCategory] = useState("");
+  const [sku, setSku] = useState("");
+  const [unitPrice, setUnitPrice] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  function openCreate() {
+    setEditing(undefined);
+    setName("");
+    setCategory("");
+    setSku("");
+    setUnitPrice("");
+    setError(null);
+    setFormOpen(true);
+  }
+
+  function openEdit(p: Product) {
+    setEditing(p);
+    setName(p.name);
+    setCategory(p.category ?? "");
+    setSku(p.sku ?? "");
+    setUnitPrice(String(p.unit_price));
+    setError(null);
+    setFormOpen(true);
+  }
+
+  async function handleSubmit(e: FormEvent) {
+    e.preventDefault();
+    setSubmitting(true);
+    setError(null);
+    const body = {
+      name,
+      category: category || undefined,
+      sku: sku || undefined,
+      unitPrice: Number(unitPrice),
+    };
+    try {
+      if (editing) {
+        await apiRequest(`/products/${editing.id}`, { method: "PATCH", body });
+      } else {
+        await apiRequest("/products", { method: "POST", body });
+      }
+      setFormOpen(false);
+      onChanged();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not save this product.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <Panel
+      title="Products"
+      subtitle={`${products.length} product${products.length === 1 ? "" : "s"}`}
+      action={
+        <button onClick={openCreate} className="text-accent text-[12.5px] hover:underline">
+          + New product
+        </button>
+      }
+    >
+      {formOpen && (
+        <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-4 gap-3 mb-4 pb-4 border-b border-border">
+          <Field label="Name">
+            <Input required value={name} onChange={(e) => setName(e.target.value)} />
+          </Field>
+          <Field label="Category (optional)">
+            <Input value={category} onChange={(e) => setCategory(e.target.value)} />
+          </Field>
+          <Field label="SKU (optional)">
+            <Input value={sku} onChange={(e) => setSku(e.target.value)} />
+          </Field>
+          <Field label="Unit price (₦)">
+            <Input
+              type="number"
+              min={0}
+              required
+              value={unitPrice}
+              onChange={(e) => setUnitPrice(e.target.value)}
+            />
+          </Field>
+          <div className="md:col-span-4 flex items-center justify-between">
+            <div>{error && <p className="text-[12.5px] text-poor">{error}</p>}</div>
+            <div className="flex gap-2">
+              <button type="button" onClick={() => setFormOpen(false)} className="text-sm px-3 py-1.5 text-ink-soft hover:text-ink">
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={submitting}
+                className="bg-ink text-white text-sm px-3 py-1.5 rounded hover:bg-ink/90 disabled:opacity-60"
+              >
+                {submitting ? "Saving…" : editing ? "Save changes" : "Add product"}
+              </button>
+            </div>
+          </div>
+        </form>
+      )}
+
+      <table className="w-full text-[12.5px]">
+        <thead>
+          <tr className="text-left text-[11.5px] text-ink-soft border-b border-border">
+            <th className="pb-2">Name</th>
+            <th className="pb-2">Category</th>
+            <th className="pb-2">SKU</th>
+            <th className="pb-2 text-right">Unit price</th>
+            <th className="pb-2"></th>
+          </tr>
+        </thead>
+        <tbody>
+          {products.map((p) => (
+            <tr key={p.id} className="border-b border-[#EDEEE4] last:border-b-0">
+              <td className="py-2.5">{p.name}</td>
+              <td className="py-2.5 text-ink-soft">{p.category ?? "—"}</td>
+              <td className="py-2.5 text-ink-soft">{p.sku ?? "—"}</td>
+              <td className="py-2.5 text-right tabular-nums">
+                ₦{Number(p.unit_price).toLocaleString("en-NG", { maximumFractionDigits: 0 })}
+              </td>
+              <td className="py-2.5 text-right">
+                <button onClick={() => openEdit(p)} className="text-accent hover:underline">
+                  Edit
+                </button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </Panel>
+  );
+}
+
 export function UsersTerritories() {
   const { user: currentUser } = useAuth();
   const isAdmin = currentUser?.role === "admin";
 
   const [territories, setTerritories] = useState<Territory[]>([]);
+  const [products, setProducts] = useState<Product[]>([]);
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -149,6 +286,12 @@ export function UsersTerritories() {
 
   function loadTerritories() {
     apiRequest<Territory[]>("/territories").then(setTerritories).catch(() => {});
+  }
+
+  function loadProducts() {
+    apiRequest<{ data: Product[] }>("/products", { query: { pageSize: 100 } })
+      .then((res) => setProducts(res.data))
+      .catch(() => {});
   }
 
   function loadUsers() {
@@ -166,6 +309,7 @@ export function UsersTerritories() {
   useEffect(() => {
     if (!isAdmin) return;
     loadTerritories();
+    loadProducts();
   }, [isAdmin]);
 
   useEffect(() => {
@@ -251,7 +395,7 @@ export function UsersTerritories() {
   if (!isAdmin) {
     return (
       <div>
-        <h1 className="font-serif text-2xl text-ink mb-2">Users & territories</h1>
+        <h1 className="font-serif text-2xl text-ink mb-2">Master data</h1>
         <p className="text-[13.5px] text-ink-soft">This screen is available to admins only.</p>
       </div>
     );
@@ -261,13 +405,17 @@ export function UsersTerritories() {
     <div>
       <div className="flex items-end justify-between mb-6">
         <div>
-          <h1 className="font-serif text-2xl text-ink mb-1">Users & territories</h1>
-          <p className="text-[13.5px] text-ink-soft">Manage staff accounts and the territory list</p>
+          <h1 className="font-serif text-2xl text-ink mb-1">Master data</h1>
+          <p className="text-[13.5px] text-ink-soft">Manage staff accounts, territories, and the product catalog</p>
         </div>
       </div>
 
       <div className="mb-5">
         <TerritoriesPanel territories={territories} onChanged={loadTerritories} />
+      </div>
+
+      <div className="mb-5">
+        <ProductsPanel products={products} onChanged={loadProducts} />
       </div>
 
       {formOpen && (

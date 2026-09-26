@@ -36,9 +36,8 @@ export function Customers() {
   const [saveError, setSaveError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!isManager) return;
     apiRequest<Territory[]>("/territories").then(setTerritories).catch(() => {});
-  }, [isManager]);
+  }, []);
 
   function load() {
     setLoading(true);
@@ -110,12 +109,14 @@ export function Customers() {
           <h1 className="font-serif text-2xl text-ink mb-1">Customers</h1>
           <p className="text-[13.5px] text-ink-soft">The territory customer database</p>
         </div>
-        <button
-          onClick={openCreate}
-          className="bg-ink text-white text-sm px-4 py-2 rounded hover:bg-ink/90"
-        >
-          + New customer
-        </button>
+        {!isManager && (
+          <button
+            onClick={openCreate}
+            className="bg-ink text-white text-sm px-4 py-2 rounded hover:bg-ink/90"
+          >
+            + New customer
+          </button>
+        )}
       </div>
 
       {panelMode !== "none" && (

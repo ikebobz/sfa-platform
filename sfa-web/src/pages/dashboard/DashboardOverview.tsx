@@ -5,6 +5,7 @@ import { DashboardOverview as OverviewData, DebtRow, Territory } from "../../typ
 import { Panel } from "../../components/ui/Panel";
 import { KpiCard, RiskTag } from "../../components/ui/KpiCard";
 import { BarRow, ProgressBar } from "../../components/ui/Bars";
+import { RepTargetsPanel } from "../../components/dashboard/RepTargetsPanel";
 
 function naira(amount: number): string {
   if (amount >= 1_000_000) return `₦${(amount / 1_000_000).toFixed(2)}m`;
@@ -20,12 +21,18 @@ function nairaFull(amount: number): string {
 // shared config source once a /settings endpoint exists.
 const MONTHLY_EXPENSE_LIMIT = 100_000;
 
-type DateRangePreset = "this_month" | "last_7_days" | "last_month";
+type DateRangePreset = "this_month" | "last_7_days" | "last_month" | "custom";
 
-function resolveDateRange(preset: DateRangePreset): { from: string; to: string; label: string } {
+function resolveDateRange(
+  preset: DateRangePreset,
+  custom: { from: string; to: string }
+): { from: string; to: string; label: string } {
   const now = new Date();
   const toISO = (d: Date) => d.toISOString().slice(0, 10);
 
+  if (preset === "custom") {
+    return { from: custom.from, to: custom.to, label: "Custom range" };
+  }
   if (preset === "last_7_days") {
     const from = new Date(now);
     from.setDate(from.getDate() - 7);
@@ -47,12 +54,18 @@ export function DashboardOverview() {
   const [territories, setTerritories] = useState<Territory[]>([]);
   const [territoryId, setTerritoryId] = useState<number | undefined>(user?.territory_id ?? undefined);
   const [preset, setPreset] = useState<DateRangePreset>("this_month");
+  const todayISO = new Date().toISOString().slice(0, 10);
+  const [customFrom, setCustomFrom] = useState(todayISO);
+  const [customTo, setCustomTo] = useState(todayISO);
   const [data, setData] = useState<OverviewData | null>(null);
   const [debtRows, setDebtRows] = useState<DebtRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const range = useMemo(() => resolveDateRange(preset), [preset]);
+  const range = useMemo(
+    () => resolveDateRange(preset, { from: customFrom, to: customTo }),
+    [preset, customFrom, customTo]
+  );
 
   useEffect(() => {
     if (!isManager) return;
@@ -122,18 +135,40 @@ export function DashboardOverview() {
             <option value="this_month">This month</option>
             <option value="last_month">Last month</option>
             <option value="last_7_days">Last 7 days</option>
+            <option value="custom">Custom range…</option>
           </select>
+          {preset === "custom" && (
+            <>
+              <input
+                type="date"
+                value={customFrom}
+                max={customTo}
+                onChange={(e) => setCustomFrom(e.target.value)}
+                className="border border-border bg-panel rounded px-3 py-1.5 text-[12.5px]"
+              />
+              <span className="self-center text-[12.5px] text-ink-soft">to</span>
+              <input
+                type="date"
+                value={customTo}
+                min={customFrom}
+                onChange={(e) => setCustomTo(e.target.value)}
+                className="border border-border bg-panel rounded px-3 py-1.5 text-[12.5px]"
+              />
+            </>
+          )}
         </div>
       </div>
 
-      <div className="flex bg-panel border border-border rounded mb-6">
+      <div className="flex flex-wrap bg-panel border border-border rounded mb-6">
         <KpiCard label="Revenue" value={naira(data.revenue.total)} />
+        <KpiCard label="Sales made" value={String(data.revenue.salesCount)} />
         <KpiCard
           label="Active customers"
           value={`${data.database.activeCustomers} / ${data.database.totalCustomers}`}
           verdict={data.database.verdict.replace(/_/g, " ").toLowerCase().replace(/^\w/, (c) => c.toUpperCase())}
           tone={data.database.activeRatio >= 0.7 ? "good" : "watch"}
         />
+        <KpiCard label="New customers" value={String(data.database.newCustomersInPeriod)} verdict="Added this period" />
         <KpiCard label="Visits logged" value={String(data.visits.totalVisits)} />
         <KpiCard
           label="Outstanding debt"
@@ -147,6 +182,10 @@ export function DashboardOverview() {
           verdict={expenseOverLimit ? `Above ${naira(MONTHLY_EXPENSE_LIMIT)} monthly limit` : "Within monthly limit"}
           tone={expenseOverLimit ? "poor" : "good"}
         />
+      </div>
+
+      <div className="mb-5">
+        <RepTargetsPanel territoryId={territoryId} />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-[1.15fr_0.85fr] gap-5 mb-5">

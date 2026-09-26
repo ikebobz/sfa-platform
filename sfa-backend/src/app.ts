@@ -19,6 +19,8 @@ import { stockRouter } from "./modules/stock/stock.routes";
 import { incentivesRouter } from "./modules/incentives/incentives.routes";
 import { invoicesRouter } from "./modules/invoices/invoices.routes";
 import { dashboardRouter } from "./modules/dashboard/dashboard.routes";
+import { targetsRouter } from "./modules/targets/targets.routes";
+import { reportsRouter } from "./modules/reports/reports.routes";
 
 export function createApp() {
   const app = express();
@@ -45,6 +47,8 @@ export function createApp() {
   api.use("/incentives", incentivesRouter);
   api.use("/invoices", invoicesRouter);
   api.use("/dashboard", dashboardRouter);
+  api.use("/targets", targetsRouter);
+  api.use("/reports", reportsRouter);
 
   app.use("/api/v1", api);
 
